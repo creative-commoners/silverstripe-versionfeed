@@ -63,30 +63,78 @@ class VersionFeedFunctionalTest extends FunctionalTest
 
         parent::tearDown();
     }
+    
+    protected function createPageWithChanges($seed = null)
+    {
+        $page = new Page();
+
+        $seed = array_merge([
+            'Title' => 'My Title',
+            'Content' => 'My Content'
+        ], $seed);
+        $page->update($seed);
+        $page->write();
+        $page->copyVersionToStage('Stage', 'Live');
+
+        $page->update(array(
+            'Title' => 'Changed: ' . $seed['Title'],
+            'Content' => 'Changed: ' . $seed['Content'],
+        ));
+        $page->write();
+        $page->copyVersionToStage('Stage', 'Live');
+
+        $page->update(array(
+            'Title' => 'Changed again: ' . $seed['Title'],
+            'Content' => 'Changed again: ' . $seed['Content'],
+        ));
+        $page->write();
+        $page->copyVersionToStage('Stage', 'Live');
+
+        $page->update(array(
+            'Title' => 'Unpublished: ' . $seed['Title'],
+            'Content' => 'Unpublished: ' . $seed['Content'],
+        ));
+        $page->write();
+
+        return $page;
+    }
 
     public function testPublicHistory()
     {
         $page = $this->createPageWithChanges(array('PublicHistory' => false));
 
         $response = $this->get($page->RelativeLink('changes'));
-        $this->assertEquals(404, $response->getStatusCode());
+        $this->assertEquals(
+            404,
+            $response->getStatusCode(),
+            'With Page\'s "PublicHistory" disabled, `changes` action response code should be 404'
+        );
 
         $response = $this->get($page->RelativeLink('allchanges'));
         $this->assertEquals(200, $response->getStatusCode());
         $xml = simplexml_load_string($response->getBody());
-        $this->assertFalse((bool)$xml->channel->item);
+        $this->assertFalse(
+            (bool)$xml->channel->item,
+            'With Page\'s "PublicHistory" disabled, `allchanges` action should not have an item in the channel'
+        );
 
         $page = $this->createPageWithChanges(array('PublicHistory' => true));
 
         $response = $this->get($page->RelativeLink('changes'));
         $this->assertEquals(200, $response->getStatusCode());
         $xml = simplexml_load_string($response->getBody());
-        $this->assertTrue((bool)$xml->channel->item);
+        $this->assertTrue(
+            (bool)$xml->channel->item,
+            'With Page\'s "PublicHistory" enabled, `changes` action should have an item in the channel'
+        );
 
         $response = $this->get($page->RelativeLink('allchanges'));
         $this->assertEquals(200, $response->getStatusCode());
         $xml = simplexml_load_string($response->getBody());
-        $this->assertTrue((bool)$xml->channel->item);
+        $this->assertTrue(
+            (bool)$xml->channel->item,
+            'With "PublicHistory" enabled, `allchanges` action should have an item in the channel'
+        );
     }
 
     public function testRateLimiting()
@@ -149,7 +197,7 @@ class VersionFeedFunctionalTest extends FunctionalTest
         Config::modify()->set(CachedContentFilter::class, 'cache_enabled', false);
     }
 
-    public function testContainsChangesForPageOnly()
+    public function testChangesActionContainsChangesForCurrentPageOnly()
     {
         $page1 = $this->createPageWithChanges(array('Title' => 'Page1'));
         $page2 = $this->createPageWithChanges(array('Title' => 'Page2'));
@@ -173,7 +221,7 @@ class VersionFeedFunctionalTest extends FunctionalTest
         $this->assertContains('Changed: Page2', $titles);
     }
 
-    public function testContainsAllChangesForAllPages()
+    public function testAllChangesActionContainsAllChangesForAllPages()
     {
         $page1 = $this->createPageWithChanges(array('Title' => 'Page1'));
         $page2 = $this->createPageWithChanges(array('Title' => 'Page2'));
@@ -185,41 +233,6 @@ class VersionFeedFunctionalTest extends FunctionalTest
         }, $xml->xpath('//item'));
         $this->assertContains('Page1', $titles);
         $this->assertContains('Page2', $titles);
-    }
-
-    protected function createPageWithChanges($seed = null)
-    {
-        $page = new Page();
-
-        $seed = array_merge(array(
-            'Title' => 'My Title',
-            'Content' => 'My Content'
-        ), $seed);
-        $page->update($seed);
-        $page->write();
-        $page->publish('Stage', 'Live');
-
-        $page->update(array(
-            'Title' => 'Changed: ' . $seed['Title'],
-            'Content' => 'Changed: ' . $seed['Content'],
-        ));
-        $page->write();
-        $page->publish('Stage', 'Live');
-
-        $page->update(array(
-            'Title' => 'Changed again: ' . $seed['Title'],
-            'Content' => 'Changed again: ' . $seed['Content'],
-        ));
-        $page->write();
-        $page->publish('Stage', 'Live');
-
-        $page->update(array(
-            'Title' => 'Unpublished: ' . $seed['Title'],
-            'Content' => 'Unpublished: ' . $seed['Content'],
-        ));
-        $page->write();
-
-        return $page;
     }
 
     /**

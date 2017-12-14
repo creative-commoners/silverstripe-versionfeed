@@ -135,6 +135,7 @@ class VersionFeedController extends Extension
                     }
 
                     // Get the diff to the previous version.
+                    $record['ID'] = $record['RecordID'];
                     $version = SiteTree::create($record);
                     if ($diff = $version->getDiff()) {
                         $changeList->push($diff);

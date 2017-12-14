@@ -11,6 +11,7 @@ use SilverStripe\Forms\CheckboxField;
 use SilverStripe\Forms\FieldGroup;
 use SilverStripe\Forms\LiteralField;
 use SilverStripe\SiteConfig\SiteConfig;
+use SilverStripe\CMS\Model\SiteTree;
 use SilverStripe\CMS\Model\SiteTreeExtension;
 
 class VersionFeed extends SiteTreeExtension
@@ -73,14 +74,27 @@ class VersionFeed extends SiteTreeExtension
     {
         // This can leak secured content if it was protected via inherited setting.
         // For now the users will need to be aware about this shortcoming.
-        $offset = $highestVersion ? "AND \"SiteTree_Versions\".\"Version\"<='".(int)$highestVersion."'" : '';
+        $offset = $highestVersion ? 'AND "SiteTree_Versions"."Version" <= ' . (int)$highestVersion : '';
         // Get just enough elements for diffing. We need one more than desired to have something to compare to.
         $qLimit = (int)$limit + 1;
-        $versions = $this->owner->allVersions(
-            "\"WasPublished\"='1' AND \"CanViewType\" IN ('Anyone', 'Inherit') $offset",
-            "\"SiteTree\".\"LastEdited\" DESC, \"SiteTree\".\"ID\" DESC",
-            $qLimit
-        );
+        $qFilter = "\"WasPublished\"='1' AND \"CanViewType\" IN ('Anyone', 'Inherit') $offset";
+        $qSort = "\"SiteTree\".\"LastEdited\" DESC, \"SiteTree\".\"ID\" DESC";
+        $versions = $this->owner->allVersions($qFilter, $qSort, $qLimit);
+
+        $filters = [
+            'RecordID' => $this->owner->ID,
+            'WasPublished' => 1,
+            'CanViewType' => ['Anyone', 'Inherit']
+        ];
+        if ($highestVersion) {
+            $filters['Version:LessThanOrEqual'] = (int)$highestVersion;
+        }
+        $siteTreeTableName = SiteTree::getSchema()->tableName(SiteTree::class);
+        $versions = SiteTree::get()
+            ->setDataQueryParam('Versioned.mode', 'all_versions')
+            ->filter($filters)
+            ->sort(['LastEdited' => 'DESC', 'ID' => 'DESC'])
+            ->limit($qLimit);
 
         // Process the list to add the comparisons.
         $changeList = new ArrayList();
@@ -95,21 +109,22 @@ class VersionFeed extends SiteTreeExtension
                 if ($version->Title != $previous->Title) {
                     $diffTitle = Diff::compareHTML($version->Title, $previous->Title);
 
-                    $version->DiffTitle = DBField::create_field('HTMLText', null);
-                    $version->DiffTitle->setValue(
-                        sprintf(
+                    $titleChangeNote = sprintf(
                             '<div><em>%s</em> ' . $diffTitle . '</div>',
                             _t(__CLASS__ . '.TITLECHANGED', 'Title has changed:')
-                        )
                     );
+                    $version->DiffTitle = DBField::create_field('HTMLText', $titleChangeNote, 'DiffTitle');
                     $changed = true;
                 }
 
                 if ($version->Content != $previous->Content) {
                     $diffContent = Diff::compareHTML($version->Content, $previous->Content);
 
-                    $version->DiffContent = DBField::create_field('HTMLText', null);
-                    $version->DiffContent->setValue('<div>'.$diffContent.'</div>');
+                    $version->DiffContent = DBField::create_field(
+                        'HTMLText',
+                        '<div>'.$diffContent.'</div>',
+                        'DiffContent'
+                    );
                     $changed = true;
                 }
 
@@ -132,8 +147,7 @@ class VersionFeed extends SiteTreeExtension
         // a diff on the initial version we will just get that version, verbatim.
         if ($previous && $versions->count()<$qLimit) {
             $first = clone($previous);
-            $first->DiffContent = DBField::create_field('HTMLText', null);
-            $first->DiffContent->setValue('<div>' . $first->Content . '</div>');
+            $first->DiffContent = DBField::create_field('HTMLText', '<div>' . $first->Content . '</div>', 'DiffContent');
             // Copy the link so it can be cached.
             $first->GeneratedLink = $first->AbsoluteLink();
             $changeList->push($first);
@@ -156,25 +170,6 @@ class VersionFeed extends SiteTreeExtension
         }
 
         return null;
-    }
-
-    /**
-     * Compile a list of changes to the current page, excluding non-published and explicitly secured versions.
-     *
-     * @deprecated 2.0.0 Use VersionFeed::getDiffList instead
-     *
-     * @param int $highestVersion Top version number to consider.
-     * @param boolean $fullHistory Set to true to get the full change history, set to false for a single diff.
-     * @param int $limit Limit to the amount of items returned.
-     *
-     * @returns ArrayList List of cleaned records.
-     */
-    public function getDiffedChanges($highestVersion = null, $fullHistory = true, $limit = 100)
-    {
-        return $this->getDiffList(
-            $highestVersion,
-            $fullHistory ? $limit : 1
-        );
     }
 
     public function updateSettingsFields(FieldList $fields)
